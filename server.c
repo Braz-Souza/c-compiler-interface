@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <pthread.h>
 
 #define MAX_OUTPUT_SIZE 4096
 #define PATH_MAX_LEN 256
@@ -162,13 +163,41 @@ void error(const char *msg) {
     exit(1);
 }
 
-int main(int argc, char *argv[]) {
-    int sockfd, newsockfd, portno;
-    socklen_t clilen;
+void *thread_function(void *arg) {
+    int newsockfd = *((int *)arg);
+    free(arg);
+    
     char buffer[256];
     char output_buffer[MAX_OUTPUT_SIZE];
+    
+    printf("Client %d connected!\n", newsockfd);
+    bzero(buffer, 256);
+    int n = read(newsockfd, buffer, 255);
+    
+    if (n < 0) {
+        perror("ERROR reading from socket");
+        close(newsockfd);
+        return NULL;
+    }
+    
+    printf("Client %d message: %s\n", newsockfd, buffer);
+    execute_c_code(buffer, output_buffer);
+    n = write(newsockfd, output_buffer, strlen(output_buffer));
+    
+    if (n < 0) {
+        perror("ERROR writing to socket");
+    }
+    
+    close(newsockfd);
+    printf("Client %d disconnected.\n\n", newsockfd);
+    
+    return NULL;
+}
+
+int main(int argc, char *argv[]) {
+    int sockfd, portno;
+    socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
-    int n;
 
     if (argc < 2) {
         fprintf(stderr, "no port provided, shutting of...\n");
@@ -188,44 +217,31 @@ int main(int argc, char *argv[]) {
         sizeof(serv_addr)) < 0)
         error("ERROR on binding");
 
-    listen(sockfd,5);
-    clilen = sizeof(cli_addr);
+    listen(sockfd, 128);
     
     printf("Server listening on port %d...\n", portno);
     
     while (1) {
-        newsockfd = accept(sockfd,
-            (struct sockaddr *) &cli_addr,
-            &clilen);
-        if (newsockfd < 0) {
+        pthread_t thread_id;
+        clilen = sizeof(cli_addr);
+        
+        int *newsockfd_ptr = malloc(sizeof(int));
+        *newsockfd_ptr = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+        
+        if (*newsockfd_ptr < 0) {
             perror("ERROR on accept");
+            free(newsockfd_ptr);
             continue;
         }
         
-        printf("Client connected!\n");
-        
-        bzero(buffer,256);
-
-        n = read(newsockfd,buffer,255);
-        
-        if (n < 0) {
-            perror("ERROR reading from socket");
-            close(newsockfd);
+        if (pthread_create(&thread_id, NULL, thread_function, newsockfd_ptr) != 0) {
+            perror("ERROR creating thread");
+            free(newsockfd_ptr);
+            close(*newsockfd_ptr);
             continue;
         }
         
-        printf("Here is the message: %s\n",buffer);
-        
-        execute_c_code(buffer, output_buffer);
-        
-        n = write(newsockfd, output_buffer, strlen(output_buffer));
-
-        if (n < 0) {
-            perror("ERROR writing to socket");
-        }
-
-        close(newsockfd);
-        printf("Client disconnected.\n\n");
+        pthread_detach(thread_id);
     }
     
     close(sockfd);
