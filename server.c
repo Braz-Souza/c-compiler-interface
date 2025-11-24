@@ -167,12 +167,12 @@ void *thread_function(void *arg) {
     int newsockfd = *((int *)arg);
     free(arg);
     
-    char buffer[256];
+    char buffer[8192];
     char output_buffer[MAX_OUTPUT_SIZE];
     
     printf("Client %d connected!\n", newsockfd);
-    bzero(buffer, 256);
-    int n = read(newsockfd, buffer, 255);
+    bzero(buffer, 8192);
+    int n = read(newsockfd, buffer, 8191);
     
     if (n < 0) {
         perror("ERROR reading from socket");
